@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask GPT</title>
+<meta name="description" content="Ask the latest OpenAI model from your browser. Your API key stays in this browser. Shows latency, tokens and cost per answer.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #fafaf8; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --card: #ffffff; --user: #eef2ff; --accent: #2f5cff; --accent-fg: #fff;
+    --code: #f3f3f0; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --fg: #ecebe6; --muted: #9b9a93; --line: #2b2b29;
+      --card: #1d1d1b; --user: #22283c; --accent: #6b8cff; --accent-fg: #0d1430;
+      --code: #232321; --err: #ff6b61;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413; --fg: #ecebe6; --muted: #9b9a93; --line: #2b2b29;
+    --card: #1d1d1b; --user: #22283c; --accent: #6b8cff; --accent-fg: #0d1430;
+    --code: #232321; --err: #ff6b61;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    position: sticky; top: 0; z-index: 2; background: var(--bg);
+    border-bottom: 1px solid var(--line); padding: 10px 16px;
+    display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+  }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; font-weight: 600; }
+  select, button, textarea, input {
+    font: inherit; color: var(--fg); background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .totals { margin-left: auto; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  main { flex: 1; width: 100%; max-width: 780px; margin: 0 auto; padding: 16px; }
+  .msg { margin: 0 0 18px; }
+  .msg.user .body {
+    background: var(--user); border-radius: 12px; padding: 10px 14px;
+    white-space: pre-wrap; margin-left: 15%;
+  }
+  .msg.assistant .body { padding: 2px 0; }
+  .body p { margin: 0 0 .8em; } .body p:last-child { margin-bottom: 0; }
+  .body pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 14px; }
+  .body code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+  .body pre code { background: none; padding: 0; }
+  .body table { border-collapse: collapse; } .body td, .body th { border: 1px solid var(--line); padding: 4px 8px; }
+  .stats { font-size: 12.5px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--fg); font-weight: 600; }
+  .error { color: var(--err); white-space: pre-wrap; }
+  .cursor::after { content: "▍"; animation: blink 1s steps(2) infinite; color: var(--muted); }
+  @keyframes blink { 50% { opacity: 0; } }
+  footer {
+    position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .composer { max-width: 780px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; min-height: 44px; max-height: 40vh; padding: 10px 12px; }
+  .hint { max-width: 780px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--fg); max-width: 420px; width: calc(100% - 32px); padding: 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h2 { margin: 0 0 8px; font-size: 17px; }
+  dialog p { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+  dialog input { width: 100%; margin-bottom: 12px; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .empty { color: var(--muted); text-align: center; margin-top: 15vh; }
+  @media (max-width: 600px) {
+    .msg.user .body { margin-left: 0; }
+    .totals { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ask GPT</h1>
+  <select id="model" title="Model"></select>
+  <select id="effort" title="Reasoning effort">
+    <option value="none">reasoning: none</option>
+    <option value="minimal">reasoning: minimal</option>
+    <option value="low">reasoning: low</option>
+    <option value="medium" selected>reasoning: medium</option>
+    <option value="high">reasoning: high</option>
+    <option value="xhigh">reasoning: xhigh</option>
+    <option value="max">reasoning: max</option>
+  </select>
+  <button id="newChat">New chat</button>
+  <button id="keyBtn">API key</button>
+  <span class="totals" id="totals"></span>
+</header>
+
+<main id="thread"><div class="empty" id="empty">Ask anything. Enter sends, Shift+Enter adds a line.</div></main>
+
+<footer>
+  <div class="composer">
+    <textarea id="prompt" rows="1" placeholder="Your question…"></textarea>
+    <button id="send" class="primary">Send</button>
+  </div>
+  <div class="hint">Your key is stored only in this browser (localStorage) and sent only to api.openai.com. Costs use OpenAI's standard-tier list prices.</div>
+</footer>
+
+<dialog id="keyDialog">
+  <h2>OpenAI API key</h2>
+  <p>Stored in this browser only. Create one at platform.openai.com → API keys.</p>
+  <input id="keyInput" type="password" placeholder="sk-…" autocomplete="off">
+  <div class="row">
+    <button id="keyForget">Forget</button>
+    <button id="keySave" class="primary">Save</button>
+  </div>
+</dialog>
+
+<script>
+// Prices: USD per 1M tokens [input, cached input, output]; "long" applies when input > 272K tokens.
+// Source: developers.openai.com/api/docs/pricing (checked 2026-11-07).
+const PRICES = {
+  'gpt-6.1-sol':   { label: 'GPT-6.1 Sol · latest · $2 / $10',       std: [2, 0.10, 10],       long: [4, 0.20, 15] },
+  'gpt-6.1-terra': { label: 'GPT-6.1 Terra · fast · $1 / $5',         std: [1, 0.05, 5],        long: [2, 0.10, 7.5] },
+  'gpt-6-astra':   { label: 'GPT-6 Astra · flagship · $10 / $50',     std: [10, 1, 50],         long: [20, 2, 75] },
+  'gpt-6-luna':    { label: 'GPT-6 Luna · cheapest · $0.10 / $0.50',  std: [0.10, 0.01, 0.50],  long: [0.20, 0.02, 0.75] },
+};
+const LONG_CTX = 272000;
+const LS = { key: 'askgpt.key', model: 'askgpt.model', effort: 'askgpt.effort', lifetime: 'askgpt.lifetimeUsd' };
+
+const $ = id => document.getElementById(id);
+const thread = $('thread'), promptEl = $('prompt'), sendBtn = $('send');
+const modelEl = $('model'), effortEl = $('effort');
+let messages = [];       // {role, content}
+let sessionUsd = 0;
+let controller = null;
+
+function ls(get, k, v) { try { return get ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch { return null; } }
+function lsDel(k) { try { localStorage.removeItem(k); } catch {} }
+
+// --- setup controls
+for (const [id, p] of Object.entries(PRICES)) {
+  const o = document.createElement('option'); o.value = id; o.textContent = p.label; modelEl.appendChild(o);
+}
+modelEl.value = ls(true, LS.model) in PRICES ? ls(true, LS.model) : 'gpt-6.1-sol';
+effortEl.value = ls(true, LS.effort) || 'medium';
+modelEl.onchange = () => ls(false, LS.model, modelEl.value);
+effortEl.onchange = () => ls(false, LS.effort, effortEl.value);
+
+function renderTotals() {
+  const life = parseFloat(ls(true, LS.lifetime) || '0');
+  $('totals').textContent = `Session ${usd(sessionUsd)} · All-time ${usd(life)}`;
+}
+function usd(x) { return x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`; }
+function fmtS(ms) { return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + ' s'; }
+function n(x) { return (x || 0).toLocaleString(); }
+
+function cost(model, u) {
+  const p = PRICES[model]; if (!p || !u) return null;
+  const r = u.input_tokens > LONG_CTX ? p.long : p.std;
+  const cached = u.input_tokens_details?.cached_tokens || 0;
+  return ((u.input_tokens - cached) * r[0] + cached * r[1] + u.output_tokens * r[2]) / 1e6;
+}
+
+// --- key dialog
+const dlg = $('keyDialog'), keyInput = $('keyInput');
+function openKey() { keyInput.value = ls(true, LS.key) || ''; dlg.showModal(); keyInput.focus(); }
+$('keyBtn').onclick = openKey;
+$('keySave').onclick = () => { const k = keyInput.value.trim(); if (k) ls(false, LS.key, k); dlg.close(); };
+$('keyForget').onclick = () => { lsDel(LS.key); keyInput.value = ''; dlg.close(); };
+keyInput.onkeydown = e => { if (e.key === 'Enter') $('keySave').onclick(); };
+
+// --- rendering
+function md(text) {
+  return DOMPurify.sanitize(marked.parse(text, { breaks: false, gfm: true }));
+}
+function addMsg(role, content) {
+  $('empty')?.remove();
+  const el = document.createElement('div'); el.className = `msg ${role}`;
+  const body = document.createElement('div'); body.className = 'body';
+  if (role === 'user') body.textContent = content; else body.innerHTML = md(content);
+  el.appendChild(body);
+  thread.appendChild(el);
+  el.scrollIntoView({ block: 'end' });
+  return { el, body };
+}
+
+$('newChat').onclick = () => {
+  if (controller) controller.abort();
+  messages = []; thread.innerHTML = '<div class="empty" id="empty">New chat.</div>'; promptEl.focus();
+};
+
+// --- send
+promptEl.addEventListener('input', () => { promptEl.style.height = 'auto'; promptEl.style.height = promptEl.scrollHeight + 'px'; });
+promptEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+sendBtn.onclick = () => controller ? controller.abort() : send();
+
+async function send() {
+  const q = promptEl.value.trim(); if (!q) return;
+  const key = ls(true, LS.key); if (!key) { openKey(); return; }
+  const model = modelEl.value, effort = effortEl.value;
+
+  promptEl.value = ''; promptEl.style.height = 'auto';
+  messages.push({ role: 'user', content: q });
+  addMsg('user', q);
+  const a = addMsg('assistant', ''); a.body.classList.add('cursor');
+  const stats = document.createElement('div'); stats.className = 'stats'; a.el.appendChild(stats);
+
+  sendBtn.textContent = 'Stop'; controller = new AbortController();
+  const t0 = performance.now(); let tFirst = null, text = '', usage = null, usedModel = model;
+  const tick = setInterval(() => { stats.textContent = `⏱ ${fmtS(performance.now() - t0)} · ${effort}`; }, 100);
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', signal: controller.signal,
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input: messages, reasoning: { effort }, stream: true, store: false }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error?.message || `HTTP ${res.status}`);
+    }
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+    const handle = chunk => {
+      let data = '';
+      for (const line of chunk.split('\n')) if (line.startsWith('data:')) data += line.slice(5).trim();
+      if (!data) return;
+      const j = JSON.parse(data);
+      if (j.type === 'response.output_text.delta') {
+        if (tFirst === null) tFirst = performance.now();
+        text += j.delta; a.body.innerHTML = md(text);
+      } else if (j.type === 'response.completed') {
+        usage = j.response.usage; usedModel = j.response.model || model;
+      } else if (j.type === 'response.failed' || j.type === 'response.incomplete') {
+        throw new Error(j.response?.error?.message || j.response?.incomplete_details?.reason || j.type);
+      } else if (j.type === 'error') {
+        throw new Error(j.message || j.error?.message || 'stream error');
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf('\n\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 2); }
+    }
+    messages.push({ role: 'assistant', content: text });
+  } catch (err) {
+    const d = document.createElement('div'); d.className = 'error';
+    d.textContent = err.name === 'AbortError' ? '(stopped)' : `Error: ${err.message}`;
+    a.el.insertBefore(d, stats);
+    if (text) messages.push({ role: 'assistant', content: text }); else messages.pop();
+  } finally {
+    clearInterval(tick); controller = null; sendBtn.textContent = 'Send'; a.body.classList.remove('cursor');
+    const total = performance.now() - t0;
+    const c = cost(model, usage);
+    if (c !== null) { sessionUsd += c; ls(false, LS.lifetime, String(parseFloat(ls(true, LS.lifetime) || '0') + c)); renderTotals(); }
+    const parts = [`⏱ <b>${fmtS(total)}</b>` + (tFirst ? ` (first token ${fmtS(tFirst - t0)})` : '')];
+    if (usage) {
+      const cached = usage.input_tokens_details?.cached_tokens || 0, reas = usage.output_tokens_details?.reasoning_tokens || 0;
+      parts.push(`${n(usage.input_tokens)} in${cached ? ` (${n(cached)} cached)` : ''}`);
+      parts.push(`${n(usage.output_tokens)} out${reas ? ` (${n(reas)} reasoning)` : ''}`);
+      parts.push(c !== null ? `<b>${usd(c)}</b>` : 'cost n/a');
+      parts.push(`${usedModel} · ${effort}`);
+    }
+    stats.innerHTML = parts.join(' · ');
+    a.el.scrollIntoView({ block: 'end' });
+    promptEl.focus();
+  }
+}
+
+renderTotals();
+if (!ls(true, LS.key)) openKey(); else promptEl.focus();
+</script>
+</body>
+</html>
