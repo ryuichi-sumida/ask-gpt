@@ -250,7 +250,9 @@ async function send() {
     messages.push({ role: 'assistant', content: text });
   } catch (err) {
     const d = document.createElement('div'); d.className = 'error';
-    d.textContent = err.name === 'AbortError' ? '(stopped)' : `Error: ${err.message}`;
+    d.textContent = err.name === 'AbortError' ? '(stopped)'
+      : err.name === 'TypeError' ? 'Error: request blocked by the browser. OpenAI omits CORS headers on 401/429 replies, so this usually means an invalid API key (or rate limit). Check the key under "API key".'
+      : `Error: ${err.message}`;
     a.el.insertBefore(d, stats);
     if (text) messages.push({ role: 'assistant', content: text }); else messages.pop();
   } finally {
