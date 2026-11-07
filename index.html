@@ -87,15 +87,7 @@
 <header>
   <h1>Ask GPT</h1>
   <select id="model" title="Model"></select>
-  <select id="effort" title="Reasoning effort">
-    <option value="none">reasoning: none</option>
-    <option value="minimal">reasoning: minimal</option>
-    <option value="low">reasoning: low</option>
-    <option value="medium" selected>reasoning: medium</option>
-    <option value="high">reasoning: high</option>
-    <option value="xhigh">reasoning: xhigh</option>
-    <option value="max">reasoning: max</option>
-  </select>
+  <select id="effort" title="Reasoning effort"></select>
   <button id="newChat">New chat</button>
   <button id="keyBtn">API key</button>
   <span class="totals" id="totals"></span>
@@ -125,11 +117,12 @@
 // Prices: USD per 1M tokens [input, cached input, output]; "long" applies when input > 272K tokens.
 // Source: developers.openai.com/api/docs/pricing (checked 2026-11-07).
 const PRICES = {
-  'gpt-6.1-sol':   { label: 'GPT-6.1 Sol · latest · $2 / $10',       std: [2, 0.10, 10],       long: [4, 0.20, 15] },
-  'gpt-6.1-terra': { label: 'GPT-6.1 Terra · fast · $1 / $5',         std: [1, 0.05, 5],        long: [2, 0.10, 7.5] },
-  'gpt-6-astra':   { label: 'GPT-6 Astra · flagship · $10 / $50',     std: [10, 1, 50],         long: [20, 2, 75] },
-  'gpt-6-luna':    { label: 'GPT-6 Luna · cheapest · $0.10 / $0.50',  std: [0.10, 0.01, 0.50],  long: [0.20, 0.02, 0.75] },
+  'gpt-6.1-sol':   { label: 'GPT-6.1 Sol · latest · $2 / $10',       std: [2, 0.10, 10],       long: [4, 0.20, 15],      efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6.1-terra': { label: 'GPT-6.1 Terra · fast · $1 / $5',         std: [1, 0.05, 5],        long: [2, 0.10, 7.5],     efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6-astra':   { label: 'GPT-6 Astra · flagship · $10 / $50',     std: [10, 1, 50],         long: [20, 2, 75],        efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6-luna':    { label: 'GPT-6 Luna · cheapest · $0.10 / $0.50',  std: [0.10, 0.01, 0.50],  long: [0.20, 0.02, 0.75], efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
 };
+// efforts = values each model accepted on 2026-11-07 ('minimal' is rejected by all four).
 const LONG_CTX = 272000;
 const LS = { key: 'askgpt.key', model: 'askgpt.model', effort: 'askgpt.effort', lifetime: 'askgpt.lifetimeUsd' };
 
@@ -148,8 +141,15 @@ for (const [id, p] of Object.entries(PRICES)) {
   const o = document.createElement('option'); o.value = id; o.textContent = p.label; modelEl.appendChild(o);
 }
 modelEl.value = ls(true, LS.model) in PRICES ? ls(true, LS.model) : 'gpt-6.1-sol';
-effortEl.value = ls(true, LS.effort) || 'medium';
-modelEl.onchange = () => ls(false, LS.model, modelEl.value);
+function fillEfforts() {
+  const want = effortEl.value || ls(true, LS.effort) || 'medium';
+  const list = PRICES[modelEl.value].efforts;
+  effortEl.innerHTML = '';
+  for (const e of list) { const o = document.createElement('option'); o.value = e; o.textContent = `reasoning: ${e}`; effortEl.appendChild(o); }
+  effortEl.value = list.includes(want) ? want : 'medium';
+}
+fillEfforts();
+modelEl.onchange = () => { ls(false, LS.model, modelEl.value); fillEfforts(); };
 effortEl.onchange = () => ls(false, LS.effort, effortEl.value);
 
 function renderTotals() {
