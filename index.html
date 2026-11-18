@@ -115,12 +115,13 @@
 
 <script>
 // Prices: USD per 1M tokens [input, cached input, output]; "long" applies when input > 272K tokens.
+// Listed most expensive first; this is the dropdown order.
 // Source: developers.openai.com/api/docs/pricing (checked 2026-11-18).
 const PRICES = {
-  'gpt-6.2-sol':   { label: 'GPT-6.2 Sol · latest · $2 / $10',       std: [2, 0.10, 10],       long: [4, 0.20, 15],      efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-  'gpt-6.1-terra': { label: 'GPT-6.1 Terra · fast · $1 / $5',         std: [1, 0.05, 5],        long: [2, 0.10, 7.5],     efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
   'gpt-6.2-astra': { label: 'GPT-6.2 Astra · flagship · $8 / $40',    std: [8, 0.40, 40],       long: [16, 0.80, 60],     efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-  'gpt-6-luna':    { label: 'GPT-6 Luna · cheapest · $0.10 / $0.50',  std: [0.10, 0.01, 0.50],  long: [0.20, 0.02, 0.75], efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6.2-sol':   { label: 'GPT-6.2 Sol · balanced · $2 / $10',     std: [2, 0.10, 10],       long: [4, 0.20, 15],      efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6.1-terra': { label: 'GPT-6.1 Terra · fast · $1 / $5',         std: [1, 0.05, 5],        long: [2, 0.10, 7.5],     efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  'gpt-6-luna':   { label: 'GPT-6 Luna · cheapest · $0.10 / $0.50',  std: [0.10, 0.01, 0.50],  long: [0.20, 0.02, 0.75], efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
 };
 // efforts = values each model accepted on the API (6.2 models 2026-11-18, others 2026-11-07; 'minimal' is rejected by all four).
 const LONG_CTX = 272000;
@@ -200,6 +201,19 @@ promptEl.addEventListener('input', () => { promptEl.style.height = 'auto'; promp
 promptEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 sendBtn.onclick = () => controller ? controller.abort() : send();
 
+// OpenAI sends 401/429 replies without CORS headers, so the browser hides them. An empty request tells them
+// apart: a valid key gets a readable 400, a rejected key is hidden again.
+async function whyBlocked(key, model) {
+  try {
+    await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }, body: '{}',
+    });
+    return `Error: OpenAI blocked this request to ${model}, but the API key is valid. That usually means a rate limit or quota error (429) for this model, or a temporary OpenAI outage. Try again, or check Limits at platform.openai.com.`;
+  } catch {
+    return 'Error: OpenAI rejected the API key (401), or the network is down. Check the key under "API key".';
+  }
+}
+
 async function send() {
   const q = promptEl.value.trim(); if (!q) return;
   const key = ls(true, LS.key); if (!key) { openKey(); return; }
@@ -215,12 +229,14 @@ async function send() {
   const t0 = performance.now(); let tFirst = null, text = '', usage = null, usedModel = model;
   const tick = setInterval(() => { stats.textContent = `⏱ ${fmtS(performance.now() - t0)} · ${effort}`; }, 100);
 
+  let connected = false;
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', signal: controller.signal,
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, input: messages, reasoning: { effort }, stream: true, store: false }),
     });
+    connected = true;
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
       throw new Error(e.error?.message || `HTTP ${res.status}`);
@@ -251,8 +267,9 @@ async function send() {
   } catch (err) {
     const d = document.createElement('div'); d.className = 'error';
     d.textContent = err.name === 'AbortError' ? '(stopped)'
-      : err.name === 'TypeError' ? 'Error: request blocked by the browser. OpenAI omits CORS headers on 401/429 replies, so this usually means an invalid API key (or rate limit). Check the key under "API key".'
-      : `Error: ${err.message}`;
+      : err.name !== 'TypeError' ? `Error: ${err.message}`
+      : connected ? `Error: connection lost mid-answer (${err.message}).`
+      : await whyBlocked(key, model);
     a.el.insertBefore(d, stats);
     if (text) messages.push({ role: 'assistant', content: text }); else messages.pop();
   } finally {
